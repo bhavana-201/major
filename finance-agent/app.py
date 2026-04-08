@@ -131,19 +131,36 @@ class FinanceAgent:
         """AI chatbot for financial queries"""
         message = user_message.lower()
         
+        # Tips and Advice (priority)
+        if any(word in message for word in ['tip', 'advice', 'reduce', 'decrease', 'lower', 'cut down']):
+            insights = self.get_ai_insights()
+            if not insights:
+                return "Keep tracking your expenses regularly, and try cutting down on your highest spending category!"
+            
+            # Filter out generic 'success' messages to focus on actionable tips
+            actual_tips = [i['message'] for i in insights if i['type'] != 'success']
+            
+            if actual_tips:
+                response = "Here are some tips based on your spending:\n"
+                for tip in actual_tips:
+                    response += f"• {tip}\n"
+                return response.strip()
+                
+            return "Your budget is looking healthy! Keep tracking your expenses regularly, or ask me for a category breakdown if you want to optimize further."
+            
+        # Savings queries
+        elif 'save' in message or 'saving' in message or 'savings' in message:
+            summary = self.get_spending_summary()
+            return f"Based on your spending, you can potentially save ₹{summary['remaining']:.2f} this month!"
+
         # Expense queries
-        if any(word in message for word in ['spent', 'expenses', 'spending']):
+        elif any(word in message for word in ['spent', 'expenses', 'spending']):
             summary = self.get_spending_summary()
             return f"You've spent ₹{summary['total_spent']:.2f} out of ₹{summary['budget']:.2f} this month. Remaining budget: ₹{summary['remaining']:.2f}"
         
         # Budget queries
         elif 'budget' in message:
             return f"Your current monthly budget is ₹{self.data['budget']:.2f}. You can update it in settings."
-        
-        # Savings queries
-        elif 'save' in message or 'saving' in message:
-            summary = self.get_spending_summary()
-            return f"Based on your spending, you can potentially save ₹{summary['remaining']:.2f} this month!"
         
         # Category queries
         elif 'category' in message or 'where' in message:
@@ -154,11 +171,6 @@ class FinanceAgent:
                     response += f"• {cat.title()}: ₹{amount:.2f}\n"
                 return response
             return "No expenses recorded yet."
-        
-        # Tips
-        elif 'tip' in message or 'advice' in message:
-            insights = self.get_ai_insights()
-            return insights[0]['message'] if insights else "Keep tracking your expenses regularly!"
         
         else:
             return "I can help you with:\n• Your spending summary\n• Budget information\n• Savings suggestions\n• Category-wise breakdown\n• Financial tips\n\nTry asking: 'How much have I spent?' or 'Give me a tip'"
@@ -222,4 +234,4 @@ if __name__ == '__main__':
     os.makedirs('templates', exist_ok=True)
     os.makedirs('static', exist_ok=True)
     
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)
