@@ -4,6 +4,7 @@ import json
 import os
 from collections import defaultdict
 import re
+from twilio.twiml.messaging_response import MessagingResponse
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'
@@ -175,6 +176,43 @@ class FinanceAgent:
         else:
             return "I can help you with:\n• Your spending summary\n• Budget information\n• Savings suggestions\n• Category-wise breakdown\n• Financial tips\n\nTry asking: 'How much have I spent?' or 'Give me a tip'"
 
+def parse_sms(sms_text):
+    """Parse Indian bank transaction SMS"""
+    amount_pattern = r'(?:Rs\.?|INR|₹)\s?(\d+(?:,\d+)*(?:\.\d{1,2})?)'
+    amount_match = re.search(amount_pattern, sms_text, re.IGNORECASE)
+
+    date_pattern = r'(\d{2}[-/]\d{2}[-/]\d{2,4})'
+    date_match = re.search(date_pattern, sms_text)
+
+    merchant_pattern = r'(?:at|to|@)\s+([A-Za-z0-9\s]+?)(?:\s+on|\s+via|\s+ref|\.|\n|$)'
+    merchant_match = re.search(merchant_pattern, sms_text, re.IGNORECASE)
+
+    debit_keywords = ['debited', 'spent', 'paid', 'debit', 'withdrawn', 'sent']
+    is_debit = any(k in sms_text.lower() for k in debit_keywords)
+
+    if not amount_match or not is_debit:
+        return None
+
+    amount_str = amount_match.group(1).replace(',', '')
+    description = merchant_match.group(1).strip() if merchant_match else "Bank transaction"
+
+    date = datetime.now().strftime('%Y-%m-%d')
+    if date_match:
+        try:
+            raw = date_match.group(1).replace('/', '-')
+            parts = raw.split('-')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        except Exception:
+            pass
+
+    return {
+        'amount': float(amount_str),
+        'description': description,
+        'date': date
+    }
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -195,7 +233,8 @@ def add_expense():
 
 @app.route('/get_summary')
 def get_summary():
-    user_id = session.get('user_id', 'default_user')
+    # Allow explicit user_id via query param (from phone login)
+    user_id = request.args.get('user_id') or session.get('user_id', 'default_user')
     agent = FinanceAgent(user_id)
     
     summary = agent.get_spending_summary()
@@ -206,6 +245,11 @@ def get_summary():
         'insights': insights,
         'expenses': agent.data['expenses'][-10:]  # Last 10 expenses
     })
+
+@app.route('/debug_users')
+def debug_users():
+    """Debug endpoint to see all user IDs in memory"""
+    return jsonify({'users': list(users_data.keys()), 'count': len(users_data)})
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -229,9 +273,65 @@ def update_budget():
     
     return jsonify({'success': True})
 
+@app.route('/sms_webhook', methods=['POST'])
+def sms_webhook():
+    """
+    Twilio sends a POST here when user forwards/texts a bank SMS
+    to your Twilio number
+    """
+    sms_body = request.form.get('Body', '').strip()
+    sender   = request.form.get('From', 'unknown').strip()
+
+    # Normalize phone: form-data decodes '+' as space, fix it
+    if sender and not sender.startswith('+'):
+        sender = '+' + sender
+
+    resp = MessagingResponse()
+
+    if not sms_body:
+        resp.message("❌ Empty message received.")
+        return str(resp)
+
+    # Try parsing as a bank transaction SMS
+    parsed = parse_sms(sms_body)
+
+    if parsed:
+        # Map phone number to user (so each user has their own data)
+        user_id = sender  # e.g. '+919876543210'
+
+        agent = FinanceAgent(user_id)
+        expense = agent.add_expense(
+            amount=parsed['amount'],
+            description=parsed['description'],
+            date=parsed['date']
+        )
+
+        summary = agent.get_spending_summary()
+
+        resp.message(
+            f"✅ Expense logged!\n"
+            f"💰 ₹{expense['amount']} — {expense['description']}\n"
+            f"📂 Category: {expense['category']}\n"
+            f"📊 Monthly total: ₹{summary['total_spent']:.2f} / ₹{summary['budget']:.2f}"
+        )
+    else:
+        resp.message(
+            "❌ Couldn't read this as a transaction.\n"
+            "Make sure it's a debit SMS like:\n"
+            "Rs.500 debited from A/c XX1234 at Swiggy"
+        )
+
+    return str(resp), 200, {'Content-Type': 'text/xml'}
+
+@app.route('/set_user', methods=['POST'])
+def set_user():
+    data = request.json
+    session['user_id'] = data['phone']
+    return jsonify({'success': True})
+
 if __name__ == '__main__':
     # Create templates directory
     os.makedirs('templates', exist_ok=True)
     os.makedirs('static', exist_ok=True)
-    
+
     app.run(debug=True, port=5001)

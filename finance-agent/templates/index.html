@@ -67,6 +67,26 @@
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+            <!-- Phone Login Card -->
+            <div
+                class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-xl border border-white/20 dark:border-gray-700 md:col-span-2 lg:col-span-3">
+                <h2
+                    class="text-indigo-600 dark:text-indigo-400 font-semibold mb-4 text-xl border-b border-gray-100 dark:border-gray-700 pb-2">
+                    📱 View Your SMS-Imported Data
+                </h2>
+                <div class="flex gap-3">
+                    <input type="tel" id="phoneInput" placeholder="+919876543210"
+                        class="flex-1 p-3 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-gray-50 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <button onclick="setPhone()"
+                        class="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white px-6 py-3 rounded-lg font-semibold shadow-md transform hover:-translate-y-0.5 transition-all">
+                        Load My Data
+                    </button>
+                </div>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                    Enter the phone number you forward SMSes from to view your auto-imported expenses.
+                </p>
+            </div>
+
             <!-- Add Expense Card -->
             <div
                 class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-xl backdrop-blur-sm border border-white/20 dark:border-gray-700">
@@ -243,6 +263,31 @@
             }
         }
 
+        // Set phone for SMS-imported data
+        let currentPhone = null;
+
+        async function setPhone() {
+            const phone = document.getElementById('phoneInput').value.trim();
+            if (!phone) return;
+
+            currentPhone = phone;
+
+            try {
+                const response = await fetch('/set_user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone })
+                });
+
+                if (response.ok) {
+                    loadSummary();
+                    alert(`✅ Loaded data for ${phone}`);
+                }
+            } catch (err) {
+                console.error("Error setting phone user", err);
+            }
+        }
+
         const categoryColors = {
             'food': 'bg-yellow-200 text-red-700 dark:bg-yellow-900 dark:text-red-200',
             'transport': 'bg-blue-200 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
@@ -265,7 +310,11 @@
         // Load Summary
         async function loadSummary() {
             try {
-                const response = await fetch('/get_summary');
+                let url = '/get_summary';
+                if (currentPhone) {
+                    url += '?user_id=' + encodeURIComponent(currentPhone);
+                }
+                const response = await fetch(url);
                 const data = await response.json();
 
                 // Update summary
